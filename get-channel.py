@@ -1,60 +1,88 @@
 import argparse, subprocess, os
 
+# global constants (commandline args parsed later in "main loop") (could be user-defined in future config file)
+OUTPUT_ROOT = os.path.realpath(os.path.join('F:\\', 'media', 'youtube','channels'))
+YTDLP_INSTALL = os.path.realpath(os.path.join('F:\\', 'media', 'youtube','yt-dlp.exe'))
+FOLDER_NAME = r'%(channel)s__%(playlist)s'
+FILE_NAME = r'%(title)s__%(id)s.%(ext)s'
+
 # parse commandline arguments
-parser = argparse.ArgumentParser(prog='Get-Channel', description='A wrapper for yt-dlp, specifically for downloading per-channel or per-playlist.')
-parser.add_argument('link', help='YouTube channel or playlist URL. Pass as a string encased in quotes for best results.')
-parser.add_argument('-a', '--age', type=int, help='The maximum age, in months, of videos to download. If 0, will check all videos regardless of age.', default=6)
-args = parser.parse_args()
-
-# output and yt-dlp install location currently hardcoded
-outputRoot = os.path.join('F:\\','media','youtube','channels') # folder the playlist folder goes in
-ytdlpInstall = os.path.join('F:\\','media','youtube','yt-dlp.exe')
-
-# constants for folder and file output paths
-FOLDER_PATH_TEMPLATE = os.path.join(outputRoot, r'%(channel)s__%(playlist)s')
-FILE_PATH_TEMPLATE = os.path.join(FOLDER_PATH_TEMPLATE, r'%(title)s__%(id)s.%(ext)s')
-
-
+def getArgs():
+    parser = argparse.ArgumentParser(prog='Get-Channel', description='A wrapper for yt-dlp, specifically for downloading per-channel or per-playlist.')
+    parser.add_argument('link', help='YouTube channel or playlist URL. Pass as a string encased in quotes.')
+    parser.add_argument('-a', '--age', type=int, help='For archives that already exist, the maximum age (in months) of videos to check for download. Default is 6 months. Ignored if archive does not exist yet.', default=6)
+    return parser.parse_args()
 
 # get name of output folder (does not include path to it)
-print("Deducing playlist folder name...")
-folderName = subprocess.run([ytdlpInstall, args.link,
-                             '--simulate',                              # don't actually download the video
-                             '--print', f'{FOLDER_PATH_TEMPLATE}',      # get the channel and playlist, in format used for the folder name
-                             '--playlist-end', '1'],                    # only do the first video.
-                             capture_output=True)                       # pipe stdout to the variable name
-folderName = folderName.stdout.decode('UTF-8').replace(' ', '_').strip()
-    # .stdout: get output from subprocess.
-    # .decode: .stdout returns raw byte data. This converts it to a string.
-    # .replace(...): change spaces to _. Mimicks what the name becomes when running ytdlp with --restrict-filenames.
-    # .strip: remove ending newline character.
-print("Output folder parsed as: ", folderName)
+def getFolderName():
+    print("[get-channel] Deducing output folder...")
 
-# verifying existence of output folder
-if not os.path.exists(folderName):
-    print("### Output folder not found. Establishing...")
-    os.makedirs(folderName)
-    print("Output folder created.")
+    # get folder name using FOLDER_NAME as a template that includes attributes which yt-dlp detects and fills in
+    result = subprocess.run([YTDLP_INSTALL, ARGS.link,
+                                 '--simulate',                              # don't actually download the video
+                                 '--print', f'{FOLDER_NAME}',               # use FOLDER_NAME as a template for what to return
+                                 '--playlist-end', '1'],                    # only do the first video.
+                                 capture_output=True)                       # pipe stdout to the variable name
+    
+    # .stdout:  get output from subprocess.
+    # .decode:  .stdout returns raw byte data. This converts it to a string. 'replace' turns non-UTF-8 chars into �
+    # .strip:   remove ending newline character and trailing spaces.
+    result = result.stdout.decode('UTF-8', 'replace').strip()
 
-# path to the archive file for this playlist or channel
-archiveFile = os.path.join(folderName, "archive.txt")
-if not os.path.exists(archiveFile):
-    print("### Archive file for this channel/playlist not found. Establishing...")
-    f = open(archiveFile, "x")
-    f.close()
-    print("Archive created.")
-else:
-    print("Archive file found: " + archiveFile)
+    # sanitizing special characters
+    result = ''.join('_' if c in ['/', '\\', '&', ' ', '�', '"', '\''] else c for c in result)
+    
+    # append root to folder name
+    result = os.path.join(OUTPUT_ROOT, result)  
 
-# constructing commandline args for yt-dlp, including max age of videos to check
-ytdlpArgs = ['--output', f'{FILE_PATH_TEMPLATE}', '--download-archive', f'{archiveFile}']
-if args.age > 0:
-    ytdlpArgs.append ('--dateafter')
-    ytdlpArgs.append(f'today-{args.age}months')
-    print("Only downloading videos", args.age, "months and newer.")
-    print(ytdlpArgs)
-else:
-    print("### NOTICE: Attempting to download ALL videos from channel/playlist, regardless of age.")
+    return result
 
-print("All checks complete. Starting downloads...\n")
-subprocess.run([ytdlpInstall, args.link] + ytdlpArgs)
+# check for existing playlist folder and its archive.txt. create if it doesn't exist.
+# Return codes: 0 => both existed; 1 => folder existed, but not archive; 2 => neither folder nor archive existed.
+def assertFolder(folderPath: str):
+    archivePath = os.path.join(folderPath, "archive.txt")
+    if os.path.exists(folderPath):
+        if os.path.exists(archivePath):
+            return 0
+        else:
+            return 1
+    else:
+        os.makedirs(folderPath)
+        open(archivePath, 'a').close()
+        print("[get-channel] Output folder and archive file created.")
+        return 2
+
+# constructing commandline args for yt-dlp, including max age of videos to check    
+def makeYtdlpArgs(folderPath: str, ga: bool):
+    archivePath = os.path.join(folderPath, "archive.txt")
+    filePath = os.path.join(folderPath, FILE_NAME)
+    result = ['--output', f'{filePath}', '--download-archive', f'{archivePath}']
+    if ga:
+        print("[get-channel] Downloading all videos in playlist, regardless of age.")
+    else:
+        result.extend(['--dateafter', f'today-{ARGS.age}months'])
+        print(f'[get-channel] Downloading videos up to {ARGS.age} months old.')
+    return result
+
+###### Main execution starts here ######
+
+ARGS = getArgs()
+folder = getFolderName()
+
+# logic to determine whether or not all files should be downloaded. Defaults to False.
+getAll = False
+match assertFolder(folder):
+    case 0: # archive already exists
+        if ARGS.age <= 0: getAll = True # if archive folder exists, but user still wants to check for all videos
+    case 1:
+        print("[get-channel] Output folder exists, but not associated archive.txt.")
+        quit()
+    case 2:
+        getAll = True
+    case _:
+        print("[get-channel] Could not assert folder existence.")
+        quit()
+
+ytdlpArgs = makeYtdlpArgs(folder, getAll)
+input("[get-channel] Press enter to begin...")
+subprocess.run([YTDLP_INSTALL, ARGS.link] + ytdlpArgs)

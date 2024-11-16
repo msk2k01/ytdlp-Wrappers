@@ -1,0 +1,16 @@
+2024-10-27: initial release
+
+2024-11-15:
+get-channel:
+    - refactored to compartmentalize steps into functions
+    - if downloading a playlist that doesn't have an existing archive, the --age flag will be ignored and all videos will be downloaded.
+        - if the output folder exists, but not an archive.txt, execution stops as this could lead to unintended behavior.
+    - "press enter to continue" before yt-dlp starts, so user can confirm intended behavior from terminal output
+    - refined terminal output
+    - improved archive folder naming to attempt parsing the same folder name that yt-dlp would using --restrict-filenames. The following cases were handled and tested:
+        - non-UTF8; "; &                    https://www.youtube.com/playlist?list=PLSBWvYm8t6uYJV3UwJdLSLfoMfNAJXY0r
+        - trailing spaces (emojis removed)  https://www.youtube.com/playlist?list=PLqjbvxh36DN2Aspf6oz59_sR8sE0Z4dYJ
+        - /                                 https://www.youtube.com/playlist?list=PLbBZM9aUMsjHIsYDJWlxyUhiwAo-BmmBV
+        - '                                 https://www.youtube.com/playlist?list=PLMNMmvIC2uGaSasBdRs1ZBCn4eHunIGxr
+        - normal playlist name              https://www.youtube.com/playlist?list=PLfMLKKebAjRznj0un4Kme9y_tv1YhBCaU
+        - (i have not yet found a playlist with backslash \ in the name, but a check for it is there)
